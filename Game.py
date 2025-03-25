@@ -574,6 +574,8 @@ while running:
     if game_state.moves_remaining <= 0 and not game_state.game_over:
         game_state.game_over = True
         game_state.display_game_over(screen)
+    elif game_state.game_over:
+        game_state.display_game_over(screen)
 
     pygame.display.flip()
     clock.tick(60)
