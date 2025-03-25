@@ -2,7 +2,7 @@ import pygame
 import random
 from transformers import pipeline
 
-from Timski.AIModule import AIModule
+from AIModule import AIModule
 
 # Initialize Pygame
 pygame.init()
