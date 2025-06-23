@@ -89,6 +89,9 @@ class GameState:
         self.ensure_no_matches_at_start()
         self.ai = AIModule()
         self.level_start_time = pygame.time.get_ticks()
+        self.level_time_limit = 60  # Initial time limit (seconds)
+        self.time_remaining = self.level_time_limit
+        self.level_start_time = pygame.time.get_ticks()
 
     def ensure_no_matches_at_start(self):
         """Ensure there are no matches when the game starts or level resets"""
@@ -227,6 +230,8 @@ class GameState:
         self.draw_grid(screen)
         self.draw_score_level_and_moves(screen)
 
+
+
     def fill_empty_spaces(self):
         """Fill empty spaces in the grid with falling tiles"""
         made_changes = False
@@ -352,23 +357,30 @@ class GameState:
         # Background panel
         pygame.draw.rect(screen, GRAY, (0, 0, WIDTH, 50))
 
+        # Format time as MM:SS
+        minutes = self.time_remaining // 60
+        seconds = self.time_remaining % 60
+        time_text = f"{minutes:02d}:{seconds:02d}"
+
+        # Color based on remaining time (red when <10 seconds)
+        time_color = RED if self.time_remaining < 10 else BLACK
+
         # Texts
         score_text = font.render(f"Score: {self.score}/{self.target_score}", True, BLACK)
         level_text = font.render(f"Level: {self.level}", True, BLACK)
         moves_text = font.render(f"Moves: {self.moves_remaining}", True, BLACK)
+        timer_text = font.render(time_text, True, time_color)
 
         # Positions
         screen.blit(score_text, (10, 10))
-        screen.blit(level_text, (WIDTH - 150, 10))
-        screen.blit(moves_text, (WIDTH // 2 - 50, 10))
+        screen.blit(level_text, (WIDTH - 250, 10))
+        screen.blit(moves_text, (WIDTH // 2 - 100, 10))
+        screen.blit(timer_text, (WIDTH - 100, 10))  # Bottom right of panel
 
     def check_level_completed(self):
-        """Check if level is completed and handle transition"""
         if self.score >= self.target_score:
-            # Calculate time taken for this level
             time_taken = (pygame.time.get_ticks() - self.level_start_time) / 1000
 
-            # Record performance data
             self.ai.record_performance(
                 level=self.level,
                 moves_left=self.moves_remaining,
@@ -376,17 +388,17 @@ class GameState:
                 time_taken=time_taken
             )
 
-            # Calculate new difficulty
-            self.move_limit = self.ai.calculate_difficulty()
+            # Get both move limit and time limit from AI
+            self.move_limit, self.level_time_limit = self.ai.calculate_difficulty()
 
             # Prepare for next level
             self.level += 1
             self.score = 0
             self.moves_remaining = self.move_limit
+            self.time_remaining = self.level_time_limit
             self.reset_grid()
             self.level_start_time = pygame.time.get_ticks()
 
-            # Show level complete screen
             self.display_level_complete(screen)
             return True
         return False
@@ -495,7 +507,6 @@ class GameState:
         pygame.draw.rect(screen, (255, 215, 0),  # Gold border
                          (WIDTH // 2 - 200, HEIGHT // 2 - 120, 400, 200), 3)
 
-
         pygame.display.flip()
 
         # 7. Wait for key press
@@ -523,6 +534,15 @@ game_state = GameState()
 running = True
 last_level_transition = 0
 while running:
+    current_time = pygame.time.get_ticks()
+    elapsed_seconds = (current_time - game_state.level_start_time) // 1000
+    game_state.time_remaining = max(0, game_state.level_time_limit - elapsed_seconds)
+
+    # Game over if time runs out
+    if game_state.time_remaining <= 0 and not game_state.game_over:
+        game_state.game_over = True
+        game_state.display_game_over(screen)
+
     current_time = pygame.time.get_ticks()
     screen.fill(WHITE)
 
