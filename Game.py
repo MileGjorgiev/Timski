@@ -1,5 +1,7 @@
 import pygame
 import random
+import os
+import json
 from transformers import pipeline
 
 from AIModule import AIModule
@@ -23,11 +25,96 @@ BLACK = (0, 0, 0)
 GRAY = (200, 200, 200)
 RED = (255, 0, 0)
 
-
 # Font initialization (after screen is created)
 font = pygame.font.Font(None, 36)
 large_font = pygame.font.Font(None, 72)
 
+SAVE_FILE = "sava_data.json"
+player_data = None
+
+
+def load_player_data():
+    if os.path.exists(SAVE_FILE):
+        with open(SAVE_FILE, 'r') as f:
+            return json.load(f)
+    return None
+
+
+def save_player_data(name, highscore):
+    with open(SAVE_FILE, 'w') as f:
+        json.dump({'name': name, 'highscore': highscore}, f)
+
+
+def get_name_input(screen, font):
+    name = ""
+    active = True
+    input_font = pygame.font.Font(None, 48)
+    input_box = pygame.Rect(WIDTH // 2 - 150, 270, 300, 50)
+
+    while active:
+        screen.fill(WHITE)
+        prompt = font.render("Enter your name:", True, BLACK)
+        pygame.draw.rect(screen, (230, 230, 230), input_box)  # background
+        pygame.draw.rect(screen, BLACK, input_box, 2)  # border
+        text_surface = input_font.render(name, True, BLACK)
+        screen.blit(prompt, (WIDTH // 2 - prompt.get_width() // 2, 200))
+        screen.blit(text_surface, (input_box.x + 10, input_box.y + 10))
+        pygame.display.flip()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN and name.strip():
+                    return name.strip()
+                elif event.key == pygame.K_BACKSPACE:
+                    name = name[:-1]
+                elif len(name) < 12 and event.unicode.isprintable():
+                    name += event.unicode
+
+
+def show_opening_screen(screen, font, player_data):
+    screen.fill(WHITE)
+    try:
+        title_img = pygame.image.load("images/Candy Crush Clone.png")
+        title_img = pygame.transform.scale(title_img, (500, 300))
+        screen.blit(title_img, (WIDTH // 2 - 250, 80))
+    except:
+        fallback = font.render("Candy Crush Clone", True, BLACK)
+        screen.blit(fallback, (WIDTH // 2 - fallback.get_width() // 2, 100))
+
+    if player_data:
+        welcome = font.render(f"Welcome, {player_data['name']}!", True, BLACK)
+        highscore = font.render(f"Highscore: {player_data['highscore']}", True, BLACK)
+        screen.blit(welcome, (WIDTH // 2 - welcome.get_width() // 2, 330))
+        screen.blit(highscore, (WIDTH // 2 - highscore.get_width() // 2, 360))
+        prompt = font.render("Press any key to start", True, BLACK)
+        screen.blit(prompt, (WIDTH // 2 - prompt.get_width() // 2, 420))
+    else:
+        prompt = font.render("Press any key to begin", True, BLACK)
+        screen.blit(prompt, (WIDTH // 2 - prompt.get_width() // 2, 420))
+
+    pygame.display.flip()
+
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.KEYDOWN:
+                waiting = False
+
+
+# Load player data and show intro screen
+player_data = load_player_data()
+show_opening_screen(screen, font, player_data)
+
+if not player_data:
+    name = get_name_input(screen, font)
+    player_data = {'name': name, 'highscore': 0}
+    save_player_data(name, 0)
 
 # Now load images (with proper error handling)
 IMAGESDICT = {}
@@ -84,13 +171,13 @@ except Exception as e:
 CANDY_TILES = [key for key in IMAGESDICT.keys() if key != 'blocker']
 
 
-
 # Game state class with all necessary methods
 class GameState:
     def __init__(self):
         self.grid = [[random.choice(CANDY_TILES) for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
         self.score = 0
         self.level = 1
+        self.total_score = 0
         self.target_score = 1000
         self.move_limit = 20
         self.moves_remaining = self.move_limit
@@ -196,12 +283,14 @@ class GameState:
         for match in matches:
             length = len(match)
             if length == 3:
-                self.score += 50
+                points = 50
             elif length == 4:
-                self.score += 100
+                points = 100
             else:  # 5 or more
-                self.score += 150
+                points = 150
 
+            self.score += points
+            self.total_score += points
         for x, y in all_positions:
             if self.grid[y][x] != 'blocker':
                 self.grid[y][x] = None
@@ -509,6 +598,14 @@ class GameState:
 
         pygame.display.flip()
 
+        # 5. High score update logic
+        try:
+            if player_data and self.total_score > player_data['highscore']:
+                player_data['highscore'] = self.total_score
+                save_player_data(player_data['name'], self.total_score)
+        except Exception as e:
+            print(f"Error saving high score: {e}")
+
     def display_level_complete(self, screen):
         """Display and wait on level complete screen"""
         # 1. Create a solid overlay (more reliable than SRCALPHA for some systems)
@@ -529,8 +626,8 @@ class GameState:
 
         # 3. Create text with outline for better visibility
         # Main text (white with red outline)
-        title_text = title_font.render(f"LEVEL {self.level-1} COMPLETE!", True, WHITE)
-        title_outline = title_font.render(f"LEVEL {self.level-1} COMPLETE!", True, RED)
+        title_text = title_font.render(f"LEVEL {self.level - 1} COMPLETE!", True, WHITE)
+        title_outline = title_font.render(f"LEVEL {self.level - 1} COMPLETE!", True, RED)
 
         # Prompt text (yellow with dark outline)
         prompt_text = prompt_font.render("Press any key to continue", True, (255, 255, 0))
@@ -565,7 +662,6 @@ class GameState:
             clock.tick(30)
 
         return True
-
 
 
 # Clock
