@@ -26,8 +26,8 @@ GRAY = (200, 200, 200)
 RED = (255, 0, 0)
 
 # Font initialization (after screen is created)
-font = pygame.font.Font(None, 36)
-large_font = pygame.font.Font(None, 72)
+font = pygame.font.Font(None, 32)
+large_font = pygame.font.Font(None, 68)
 
 SAVE_FILE = "sava_data.json"
 player_data = None
@@ -149,7 +149,14 @@ try:
             pygame.draw.rect(surf, (50, 50, 50), (2, 2, TILE_SIZE - 4, TILE_SIZE - 4), 0, 8)
             IMAGESDICT['blocker'] = surf
 
-
+    try:
+        IMAGESDICT['bomb'] = pygame.image.load("images/bomb.png").convert_alpha()
+    except:
+        surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        pygame.draw.circle(surf, (0, 0, 0), (TILE_SIZE // 2, TILE_SIZE // 2), TILE_SIZE // 2 - 5)
+        pygame.draw.circle(surf, (255, 0, 0), (TILE_SIZE // 2, TILE_SIZE // 2), TILE_SIZE // 2 - 10)
+        pygame.draw.rect(surf, (200, 200, 0), (TILE_SIZE // 2, 5, TILE_SIZE // 4, 5))
+        IMAGESDICT['bomb'] = surf
 
 except Exception as e:
     print(f"Error loading images: {e}")
@@ -161,14 +168,18 @@ except Exception as e:
         ('orange candy', (255, 165, 0)),
         ('purple candy', (128, 0, 128)),
         ('red candy', (255, 0, 0)),
-        ('yellow candy', (255, 255, 0))
+        ('yellow candy', (255, 255, 0)),
+        ('bomb', (0, 0, 0))
     ]
     for name, color in colors:
         surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-        pygame.draw.rect(surf, color, (2, 2, TILE_SIZE - 4, TILE_SIZE - 4), 0, 10)
+        if name == 'bomb':
+            pygame.draw.circle(surf, color, (TILE_SIZE // 2, TILE_SIZE // 2), TILE_SIZE // 2 - 5)
+        else:
+            pygame.draw.rect(surf, color, (2, 2, TILE_SIZE - 4, TILE_SIZE - 4), 0, 10)
         IMAGESDICT[name] = surf
 
-CANDY_TILES = [key for key in IMAGESDICT.keys() if key != 'blocker']
+CANDY_TILES = [key for key in IMAGESDICT.keys() if key not in ['blocker', 'bomb']]
 
 
 # Game state class with all necessary methods
@@ -188,12 +199,16 @@ class GameState:
         self.game_over = False
         self.ensure_no_matches_at_start()
         self.blocker_positions = set()
+        self.bomb_positions = set()
         self.place_blockers_for_level()
+        self.place_bombs()
         self.ai = AIModule()
         self.level_start_time = pygame.time.get_ticks()
         self.level_time_limit = 60  # Initial time limit (seconds)
         self.time_remaining = self.level_time_limit
         self.level_start_time = pygame.time.get_ticks()
+        self.bomb_spawn_timer = 0
+        self.bomb_spawn_interval = 10000
 
     def place_blockers_for_level(self):
         self.blocker_positions.clear()
@@ -208,9 +223,25 @@ class GameState:
             x = random.randint(0, GRID_SIZE - 1)
             y = random.randint(0, GRID_SIZE - 1)
             # Only place if empty or candy, NOT if blocker or something else
-            if self.grid[y][x] != 'blocker':
+            if self.grid[y][x] != 'blocker' and self.grid[y][x] != 'bomb':
                 self.grid[y][x] = 'blocker'
                 self.blocker_positions.add((x, y))
+                placed += 1
+
+    def place_bombs(self):
+        """Place bombs randomly on the grid"""
+        self.bomb_positions.clear()
+
+        # Place 1 bomb for every 2 levels
+        num_bombs = max(1, self.level // 2)
+
+        placed = 0
+        while placed < num_bombs:
+            x = random.randint(0, GRID_SIZE - 1)
+            y = random.randint(0, GRID_SIZE - 1)
+            if self.grid[y][x] != 'blocker' and self.grid[y][x] != 'bomb':
+                self.grid[y][x] = 'bomb'
+                self.bomb_positions.add((x, y))
                 placed += 1
 
     def ensure_no_matches_at_start(self):
@@ -222,10 +253,11 @@ class GameState:
             # Reshuffle the grid if there are matches at start
             for y in range(GRID_SIZE):
                 for x in range(GRID_SIZE):
-                    self.grid[y][x] = random.choice(CANDY_TILES)  # Only candy tiles, no blockers
+                    if self.grid[y][x] != 'blocker' and self.grid[y][x] != 'bomb':
+                        self.grid[y][x] = random.choice(CANDY_TILES)  # Only candy tiles, no blockers or bombs
 
     def check_matches(self):
-        """Check for all matches on the board, ignoring blockers"""
+        """Check for all matches on the board, ignoring blockers and bombs"""
         matches = []
 
         # Check horizontal matches
@@ -233,13 +265,13 @@ class GameState:
             x = 0
             while x < GRID_SIZE - 2:
                 current = self.grid[y][x]
-                if current is None or current == 'blocker':
+                if current is None or current in ['blocker', 'bomb']:
                     x += 1
                     continue
                 match_length = 1
                 while x + match_length < GRID_SIZE and self.grid[y][x + match_length] == current:
-                    if self.grid[y][x + match_length] == 'blocker':
-                        break  # Stop match at blocker
+                    if self.grid[y][x + match_length] in ['blocker', 'bomb']:
+                        break  # Stop match at blocker or bomb
                     match_length += 1
                 if match_length >= 3:
                     matches.append([(x + i, y) for i in range(match_length)])
@@ -252,13 +284,13 @@ class GameState:
             y = 0
             while y < GRID_SIZE - 2:
                 current = self.grid[y][x]
-                if current is None or current == 'blocker':
+                if current is None or current in ['blocker', 'bomb']:
                     y += 1
                     continue
                 match_length = 1
                 while y + match_length < GRID_SIZE and self.grid[y + match_length][x] == current:
-                    if self.grid[y + match_length][x] == 'blocker':
-                        break  # Stop match at blocker
+                    if self.grid[y + match_length][x] in ['blocker', 'bomb']:
+                        break  # Stop match at blocker or bomb
                     match_length += 1
                 if match_length >= 3:
                     matches.append([(x, y + i) for i in range(match_length)])
@@ -268,10 +300,29 @@ class GameState:
 
         return matches
 
+    def check_bomb_adjacent(self, matches):
+        """Check if any matches are adjacent to bombs and deduct points"""
+        for match in matches:
+            for x, y in match:
+                # Check all adjacent positions
+                for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE:
+                        if self.grid[ny][nx] == 'bomb':
+                            self.score = max(0, self.score - 30)  # Deduct 30 points, don't go below 0
+                            self.total_score = max(0, self.total_score - 30)
+                            # Remove the bomb
+                            self.grid[ny][nx] = None
+                            self.bomb_positions.discard((nx, ny))
+                            break  # Only deduct once per bomb
+
     def remove_matches(self, matches):
         """Remove matched tiles and update score"""
         if not matches:
             return False
+
+        # First check for bombs adjacent to matches
+        self.check_bomb_adjacent(matches)
 
         # Flatten the list of matches and remove duplicates
         all_positions = set()
@@ -292,7 +343,7 @@ class GameState:
             self.score += points
             self.total_score += points
         for x, y in all_positions:
-            if self.grid[y][x] != 'blocker':
+            if self.grid[y][x] not in ['blocker', 'bomb']:
                 self.grid[y][x] = None
 
         return True
@@ -363,17 +414,17 @@ class GameState:
         self.draw_score_level_and_moves(screen)
 
     def fill_empty_spaces(self):
-        """Fill empty spaces in the grid with falling tiles, ignoring blockers"""
+        """Fill empty spaces in the grid with falling tiles, ignoring blockers and bombs"""
         made_changes = False
 
         for x in range(GRID_SIZE):
             empty_slots = []
 
-            # Step 1: From bottom to top, collect empty y positions (but skip blockers)
+            # Step 1: From bottom to top, collect empty y positions (but skip blockers and bombs)
             for y in range(GRID_SIZE - 1, -1, -1):
                 if self.grid[y][x] is None:
                     empty_slots.append(y)
-                elif self.grid[y][x] == 'blocker':
+                elif self.grid[y][x] in ['blocker', 'bomb']:
                     continue
                 elif empty_slots:
                     # Move this tile down to the lowest available empty slot
@@ -390,11 +441,18 @@ class GameState:
 
             # Step 2: Add new tiles from the top for remaining empty slots
             for i, y in enumerate(reversed(empty_slots)):
+                # 5% chance to spawn a bomb instead of candy (only if level > 1)
+                if self.level > 1 and random.random() < 0.03 and len(self.bomb_positions) < (self.level // 2 + 1):
+                    tile_type = 'bomb'
+                    self.bomb_positions.add((x, y))
+                else:
+                    tile_type = random.choice(CANDY_TILES)
+
                 self.falling_tiles.append({
                     "x": x,
                     "y": -((i + 1) * TILE_SIZE) + 50,
                     "target_y": y,
-                    "type": random.choice(list(IMAGESDICT.keys() - {'blocker'}))
+                    "type": tile_type
                 })
                 made_changes = True
 
@@ -561,9 +619,11 @@ class GameState:
     def reset_grid(self):
         for y in range(GRID_SIZE):
             for x in range(GRID_SIZE):
-                self.grid[y][x] = random.choice(CANDY_TILES)
+                if (x, y) not in self.blocker_positions and (x, y) not in self.bomb_positions:
+                    self.grid[y][x] = random.choice(CANDY_TILES)
         self.ensure_no_matches_at_start()
         self.place_blockers_for_level()
+        self.place_bombs()
 
     def display_game_over(self, screen):
         """Display game over screen with guaranteed visibility"""
@@ -677,6 +737,12 @@ while running:
     current_time = pygame.time.get_ticks()
     elapsed_seconds = (current_time - game_state.level_start_time) // 1000
     game_state.time_remaining = max(0, game_state.level_time_limit - elapsed_seconds)
+
+    # Spawn new bombs periodically (every 10 seconds)
+    if current_time - game_state.bomb_spawn_timer > game_state.bomb_spawn_interval:
+        game_state.bomb_spawn_timer = current_time
+        if game_state.level > 1:  # Only spawn bombs after level 1
+            game_state.place_bombs()
 
     # Game over if time runs out
     if game_state.time_remaining <= 0 and not game_state.game_over:
